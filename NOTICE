@@ -1,0 +1,8 @@
+svo2view
+Copyright 2026 The svo2view authors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project is not affiliated with, endorsed by, or sponsored by Stereolabs. "ZED" and "SVO" are trademarks of
+Stereolabs. svo2view reads SVO2 files for interoperability; it contains no Stereolabs code and does not require the
+ZED SDK. The optional scripts in tools/ use the ZED SDK's Python API (pyzed), which is licensed separately by Stereolabs.

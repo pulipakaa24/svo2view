@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>svo2view</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1b1f24; --muted: #5d6673; --line: #dde1e6;
+  --accent: #2463eb; --ok: #1a7f37; --warn: #b26b00; --bad: #c62828; --chip: #eef1f5;
+  --s1: #2463eb; --s2: #d97706; --s3: #16a34a; --grid: #e7eaee;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #111418; --panel: #1a1e24; --ink: #e6e9ee; --muted: #9aa4b1; --line: #2c323a;
+          --accent: #6b9bff; --ok: #4cc26b; --warn: #e3a33b; --bad: #ff6b60; --chip: #242a32;
+          --s1: #6b9bff; --s2: #f0a53a; --s3: #4cc26b; --grid: #262c34; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
+header h1 { font-size: 16px; margin: 0 6px 0 0; }
+header a { color: var(--accent); text-decoration: none; font-size: 13px; }
+.pill { display: inline-flex; gap: 6px; align-items: center; padding: 2px 10px; border-radius: 999px; background: var(--chip); font-size: 12px; color: var(--muted); white-space: nowrap; }
+.pill b { color: var(--ink); font-weight: 600; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; padding: 16px; max-width: 1800px; margin: 0 auto; }
+@media (max-width: 1100px) { main { grid-template-columns: minmax(0, 1fr); } }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; }
+.video { position: relative; background: #000; border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; min-height: 200px; }
+.video img { width: 100%; height: auto; display: block; }
+.video .ph { color: #9aa4b1; font-size: 13px; position: absolute; text-align: center; padding: 16px; }
+.video .gap { position: absolute; top: 8px; right: 8px; background: var(--warn); color: #000; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 4px; display: none; }
+.row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 10px 0; }
+label { color: var(--muted); font-size: 12px; display: inline-flex; gap: 6px; align-items: center; }
+select { background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+button { background: var(--chip); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; min-width: 84px; }
+input[type=range] { width: 100%; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.muted { color: var(--muted); } .warnc { color: var(--warn); } .badc { color: var(--bad); } .okc { color: var(--ok); }
+.readout { font-variant-numeric: tabular-nums; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 5px 10px; background: var(--bg); }
+.seg button.on { background: var(--accent); color: #fff; }
+.plot { margin-bottom: 10px; }
+.plot .t { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.plot .t .v { font-variant-numeric: tabular-nums; color: var(--ink); }
+.plot canvas { width: 100%; height: 86px; display: block; cursor: crosshair; }
+.key i { display: inline-block; width: 10px; height: 3px; vertical-align: middle; margin: 0 3px 0 6px; border-radius: 2px; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+td { padding: 4px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+td:first-child { color: var(--muted); white-space: nowrap; }
+.err { color: var(--bad); padding: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>svo2view</h1>
+  <select id="rec" title="Recording"></select>
+  <span class="pill" id="p-res">—</span>
+  <span class="pill" id="p-len">—</span>
+  <span class="pill" id="p-gaps">—</span>
+  <span class="pill" id="p-cal">—</span>
+  <span style="flex:1"></span>
+  <a href="https://github.com/pulipakaa24/svo2view" target="_blank" rel="noopener">about</a>
+</header>
+<main>
+  <div>
+    <section>
+      <div class="video" id="video"><img id="img" alt=""><div class="ph" id="ph">Loading…</div><div class="gap" id="gap"></div></div>
+      <input type="range" id="slider" min="0" max="0" value="0" step="1" aria-label="Frame">
+      <div class="row">
+        <button class="primary" id="play">▶ Play</button>
+        <button id="prev" title="Previous frame (←)">◀ 1</button>
+        <button id="next" title="Next frame (→)">1 ▶</button>
+        <label>Speed <select id="speed"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option><option>4</option><option value="0">every frame</option></select></label>
+        <span class="readout mono" id="readout">—</span>
+      </div>
+      <div class="row">
+        <span class="seg" id="view"><button data-v="sbs" class="on">Side by side</button><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="anaglyph">Anaglyph</button></span>
+        <span class="seg" id="look" title="Camera: the stored frame exactly as recorded. SDK look: adds the ZED SDK's playback sharpening (approximation)."><button data-v="camera" class="on">Camera</button><button data-v="sdk">SDK look</button></span>
+        <label><input type="checkbox" id="rect"> Rectified</label>
+        <button id="png" title="Save this frame at full resolution as PNG (lossless)">Save PNG</button>
+      </div>
+      <div class="muted" id="ts" style="font-size:12px"></div>
+    </section>
+  </div>
+  <div>
+    <section>
+      <h2>Sensors <span class="muted" id="s-n" style="text-transform:none;letter-spacing:0"></span></h2>
+      <div id="plots"></div>
+    </section>
+    <section style="margin-top:16px">
+      <h2>Parity with the ZED SDK</h2>
+      <table id="parity"></table>
+      <p class="muted" style="font-size:12px;margin:8px 0 0">Measured against the ZED SDK 5.5's own output (tools/parity_vs_sdk.py).
+        Not affiliated with Stereolabs.</p>
+    </section>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const params = new URLSearchParams(location.search);
+let I = null, cur = 0, playing = false, view = "sbs", look = "camera", busy = false, pending = null, gapSet = new Map();
+let playT0 = 0, playF0 = 0;
+
+async function j(url) { const r = await fetch(url); const x = await r.json(); if (!r.ok) throw new Error(x.error || r.status); return x; }
+
+async function init() {
+  const L = await j("/api/list");
+  const recs = L.recordings;
+  $("rec").innerHTML = recs.map(x => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("");
+  const id = params.get("id") || (recs[0] && recs[0].id);
+  if (!id) { $("ph").textContent = "No recordings."; return; }
+  $("rec").value = id;
+  await load(id);
+}
+$("rec").onchange = () => { const n = $("rec").value; history.replaceState(null, "", "?id=" + encodeURIComponent(n)); load(n); };
+
+async function load(name) {
+  stop(); $("ph").style.display = ""; $("ph").textContent = "Indexing…"; $("img").removeAttribute("src");
+  try { I = await j("/api/info?id=" + encodeURIComponent(name)); }
+  catch (e) { $("ph").innerHTML = `<span class="badc">${esc(e.message)}</span>`; return; }
+  I.name = name;
+  $("p-res").innerHTML = `<b>${I.width}×${I.height}</b> per eye @ ${I.fps} fps` + (I.serial ? ` · SN ${I.serial}` : "");
+  $("p-len").innerHTML = `<b>${I.n}</b> frames · ${I.duration_s.toFixed(1)} s`;
+  gapSet = new Map(I.gaps.map(g => [g.frame, g.ms]));
+  $("p-gaps").innerHTML = I.gaps.length ? `<span class="warnc">${I.gaps.length} gaps</span> (max ${Math.max(...I.gaps.map(g => g.ms)).toFixed(0)} ms)` : `<span class="okc">no frame gaps</span>`;
+  $("p-cal").innerHTML = `calibration: <b>${esc(I.calibration)}</b>`;
+  $("rect").disabled = I.calibration.startsWith("none");
+  $("slider").max = I.n - 1;
+  $("parity").innerHTML = Object.entries(I.parity).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("");
+  buildPlots();
+  cur = 0; show(0, true);
+}
+
+function frameUrl(i, fmt) {
+  const w = fmt === "png" ? 0 : Math.round($("video").clientWidth * Math.min(devicePixelRatio || 1, 2));
+  return `/api/frame?id=${encodeURIComponent(I.name)}&i=${i}&view=${view}&look=${look}&rect=${$("rect").checked ? 1 : 0}` +
+         (fmt === "png" ? "&fmt=png" : `&w=${w}`);
+}
+
+// one request in flight; the newest wanted frame wins
+function show(i, force) {
+  if (!I) return;
+  i = Math.max(0, Math.min(I.n - 1, i));
+  if (i === cur && !force && $("img").src) return;
+  cur = i; updateReadout();
+  if (busy) { pending = i; return; }
+  busy = true;
+  const url = frameUrl(i);
+  fetch(url).then(r => r.ok ? r.blob() : r.json().then(x => { throw new Error(x.error); })).then(b => {
+    const u = URL.createObjectURL(b), old = $("img").src;
+    $("img").onload = () => { if (old && old.startsWith("blob:")) URL.revokeObjectURL(old); };
+    $("img").src = u; $("ph").style.display = "none";
+  }).catch(e => { $("ph").style.display = ""; $("ph").innerHTML = `<span class="badc">${esc(e.message)}</span>`; stop(); })
+    .finally(() => { busy = false; if (pending !== null) { const p = pending; pending = null; show(p, true); } else if (playing) tick(); });
+}
+
+function updateReadout() {
+  $("slider").value = cur;
+  const ms = I.frame_ms[cur];
+  $("readout").textContent = `frame ${cur + 1} / ${I.n} · ${(ms / 1000).toFixed(3)} s`;
+  const tns = BigInt(I.t0_ns) + BigInt(Math.round(ms * 1e6));
+  $("ts").textContent = `image timestamp ${new Date(Number(tns / 1000000n)).toISOString()} (${tns} ns)`;
+  const g = gapSet.get(cur);
+  $("gap").style.display = g ? "block" : "none"; if (g) $("gap").textContent = `gap before this frame: ${g.toFixed(0)} ms`;
+  drawCursors();
+}
+
+// ---------------------------------------------------------------- playback (wall clock paced by the recorded timestamps)
+function tick() {
+  if (!playing) return;
+  const sp = +$("speed").value;
+  let next;
+  if (sp === 0) next = cur + 1;
+  else {
+    const want = I.frame_ms[playF0] + (performance.now() - playT0) * sp;
+    next = cur + 1;
+    while (next < I.n - 1 && I.frame_ms[next + 1] <= want) next++;     // behind: skip
+    const wait = (I.frame_ms[next] - want) / sp;
+    if (wait > 4) { setTimeout(() => { if (playing) show(next, true); }, wait); if (next >= I.n) stop(); return; }
+  }
+  if (next >= I.n) { stop(); return; }
+  show(next, true);
+}
+function start() { if (!I) return; if (cur >= I.n - 1) cur = 0; playing = true; playT0 = performance.now(); playF0 = cur; $("play").textContent = "❚❚ Pause"; tick(); }
+function stop() { playing = false; $("play").textContent = "▶ Play"; }
+$("play").onclick = () => playing ? stop() : start();
+$("speed").onchange = () => { if (playing) { playT0 = performance.now(); playF0 = cur; } };
+$("prev").onclick = () => { stop(); show(cur - 1); };
+$("next").onclick = () => { stop(); show(cur + 1); };
+$("slider").oninput = () => { stop(); show(+$("slider").value); };
+$("rect").onchange = () => show(cur, true);
+$("png").onclick = () => { if (I) location.href = frameUrl(cur, "png"); };
+for (const id of ["view", "look"]) $(id).onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  [...$(id).children].forEach(x => x.classList.toggle("on", x === b));
+  if (id === "view") view = b.dataset.v; else look = b.dataset.v;
+  show(cur, true);
+};
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT" && e.target.type !== "range") return;
+  if (e.key === " ") { e.preventDefault(); playing ? stop() : start(); }
+  if (e.key === "ArrowRight") { e.preventDefault(); stop(); show(cur + (e.shiftKey ? 10 : 1)); }
+  if (e.key === "ArrowLeft") { e.preventDefault(); stop(); show(cur - (e.shiftKey ? 10 : 1)); }
+});
+addEventListener("resize", () => { drawPlots(); });
+
+// ---------------------------------------------------------------- sensor plots
+const PLOTS = [
+  { k: "acc", title: "Accelerometer", unit: "m/s²", names: ["x", "y", "z"] },
+  { k: "gyro", title: "Gyroscope", unit: "°/s", names: ["x", "y", "z"] },
+  { k: "euler", title: "Orientation (SDK fusion)", unit: "°", names: ["roll", "pitch", "yaw"] },
+  { k: "mag", title: "Magnetometer", unit: "µT", names: ["x", "y", "z"] },
+  { k: "pressure_hpa", title: "Barometer", unit: "hPa", names: ["p"] },
+  { k: "temp", title: "Temperature", unit: "°C", names: ["IMU", "left", "right"] },
+];
+const COLORS = () => { const cs = getComputedStyle(document.documentElement); return ["--s1", "--s2", "--s3"].map(v => cs.getPropertyValue(v).trim()); };
+function buildPlots() {
+  const S = I.sensors;
+  $("s-n").textContent = `${S.n.toLocaleString()} samples` + (S.step > 1 ? ` (plotted every ${S.step}th)` : "");
+  const col = COLORS();
+  $("plots").innerHTML = PLOTS.map((p, n) => `<div class="plot"><div class="t"><span>${p.title} <span class="key">${p.names.length > 1 ?
+    p.names.map((nm, c) => `<i style="background:${col[c]}"></i>${nm}`).join("") : ""}</span></span><span class="v" id="pv${n}"></span></div>
+    <canvas id="pc${n}"></canvas></div>`).join("");
+  PLOTS.forEach((p, n) => { $("pc" + n).onclick = e => { const r = e.target.getBoundingClientRect(); seekTime((e.clientX - r.left) / r.width * I.duration_s); }; });
+  drawPlots();
+}
+function seekTime(t) { stop(); let lo = 0, hi = I.n - 1; while (lo < hi) { const m = (lo + hi) >> 1; if (I.frame_ms[m] / 1000 < t) lo = m + 1; else hi = m; } show(lo); }
+const base = {};
+function drawPlots() {
+  if (!I) return;
+  const S = I.sensors, T = S.t_s, dur = Math.max(I.duration_s, 1e-3), col = COLORS(), cs = getComputedStyle(document.documentElement);
+  PLOTS.forEach((p, n) => {
+    const cv = $("pc" + n), dpr = devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    const g = cv.getContext("2d"); g.scale(dpr, dpr);
+    const rows = S[p.k].map(v => Array.isArray(v) ? v : [v]);
+    let lo = Infinity, hi = -Infinity;
+    for (const r of rows) for (const v of r) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    if (!(hi > lo)) { hi = lo + 1; lo -= 1; }
+    const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+    g.strokeStyle = cs.getPropertyValue("--grid"); g.lineWidth = 1;
+    g.beginPath(); g.moveTo(0, H - 0.5); g.lineTo(W, H - 0.5); g.stroke();
+    g.fillStyle = cs.getPropertyValue("--muted"); g.font = "10px -apple-system, sans-serif";
+    g.fillText(hi.toFixed(Math.abs(hi) < 10 ? 2 : 1), 2, 10); g.fillText(lo.toFixed(Math.abs(lo) < 10 ? 2 : 1), 2, H - 3);
+    const x = t => t / dur * W, y = v => H - (v - lo) / (hi - lo) * H;
+    rows[0].forEach((_, c) => {
+      g.strokeStyle = col[c]; g.lineWidth = 1.25; g.beginPath();
+      rows.forEach((r, k) => { const X = x(T[k]), Y = y(r[c]); k ? g.lineTo(X, Y) : g.moveTo(X, Y); });
+      g.stroke();
+    });
+    base[n] = g.getImageData(0, 0, cv.width, cv.height);
+  });
+  drawCursors();
+}
+function drawCursors() {
+  if (!I || !I.sensors) return;
+  const S = I.sensors, t = I.frame_ms[cur] / 1000, dur = Math.max(I.duration_s, 1e-3);
+  let lo = 0, hi = S.t_s.length - 1; while (lo < hi) { const m = (lo + hi) >> 1; if (S.t_s[m] < t) lo = m + 1; else hi = m; }
+  PLOTS.forEach((p, n) => {
+    const cv = $("pc" + n); if (!cv || !base[n]) return;
+    const g = cv.getContext("2d"), dpr = devicePixelRatio || 1;
+    g.putImageData(base[n], 0, 0);
+    g.save(); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const X = Math.round(t / dur * cv.clientWidth) + 0.5;
+    g.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--ink"); g.globalAlpha = .55; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(X, 0); g.lineTo(X, cv.clientHeight); g.stroke(); g.restore();
+    const v = S[p.k][lo];
+    $("pv" + n).textContent = (Array.isArray(v) ? v.map(a => a.toFixed(2)).join("  ") : v.toFixed(2)) + " " + p.unit;
+  });
+}
+init().catch(e => { $("ph").innerHTML = `<span class="badc">${esc(e.message)}</span>`; });
+</script>
+</body>
+</html>
