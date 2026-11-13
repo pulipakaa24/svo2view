@@ -100,6 +100,16 @@ class SVO2:
             self._codec_name = "hevc" if hevc else "h264"
         return self._codec_name
 
+    def _split(self, a):
+        """yuv420p ndarray -> side-by-side planes (Y: H x 2W). At widths the H.265 encoder cannot take (HD2K: 4416 px)
+        the SDK stores the two eyes one above the other (2208 x 2484); this rearranges that to side by side."""
+        H, W = a.shape[0] * 2 // 3, a.shape[1]
+        Y, U, V = a[:H], a[H:H + H // 4].reshape(H // 2, W // 2), a[H + H // 4:].reshape(H // 2, W // 2)
+        if self.height and H == 2 * self.height and W == self.width:
+            h, hc = self.height, self.height // 2
+            Y, U, V = np.hstack([Y[:h], Y[h:]]), np.hstack([U[:hc], U[hc:]]), np.hstack([V[:hc], V[hc:]])
+        return Y, U, V
+
     def is_keyframe(self, i):
         if i not in self._key:
             b = self._payload(i)[:4096]
@@ -134,8 +144,7 @@ class SVO2:
                 self._codec = None
                 raise RuntimeError(f"frame {i}: the decoder returned no picture")
             a = fr.to_ndarray(format="yuv420p")
-        H, W = a.shape[0] * 2 // 3, a.shape[1]
-        return a[:H], a[H:H + H // 4].reshape(H // 2, W // 2), a[H + H // 4:].reshape(H // 2, W // 2)
+        return self._split(a)
 
     def image(self, i, look="camera", rect=False):
         """Side-by-side BGR uint8 (H x 2W x 3). look: "camera" (as stored) or "sdk" (approximate SDK sharpening)."""
@@ -155,6 +164,90 @@ class SVO2:
             out = np.concatenate([cv2.remap(out[:, :w], lx, ly, cv2.INTER_LINEAR),
                                   cv2.remap(out[:, w:], rx, ry, cv2.INTER_LINEAR)], 1)
         return out
+
+    # ------------------------------------------------------------ playback (streaming, all cores)
+    def stream(self, start=0):
+        """Yield (i, Y, U, V) for frames start..n-1 in order, decoded with frame threading (all cores; ~7 ms / frame
+        HD720, ~11 ms HD2K on an Apple M-series Mac vs ~39 / ~118 ms single-threaded). Independent of yuv()'s decoder."""
+        start = max(0, min(int(start), self.n - 1))
+        k = start
+        while k > 0 and not self.is_keyframe(k):
+            k -= 1
+        codec = av.CodecContext.create(self._codec_for(), "r")
+        codec.thread_type = "FRAME"
+        out_i = k
+
+        def emit(frames):
+            nonlocal out_i
+            for fr in frames:
+                i = out_i
+                out_i += 1
+                if i >= start:
+                    yield (i,) + self._split(fr.to_ndarray(format="yuv420p"))
+
+        drained = False
+        try:
+            for j in range(k, self.n):
+                yield from emit(codec.decode(av.Packet(self._payload(j))))
+            drained = True
+            yield from emit(codec.decode(None))
+        finally:
+            if not drained:  # stopped early: drain the frame threads first; freeing a busy frame-threaded context hangs
+                try:
+                    codec.decode(None)
+                except Exception:  # noqa: BLE001
+                    pass
+            del codec
+
+    def display(self, Y, U, V, look="camera", rect=False, view="sbs", width=0):
+        """Fast BGR for the screen: resample the YUV planes straight to the display size (rectified or not), then
+        convert. For playback; still frames use image() (full resolution, exact)."""
+        H, W = Y.shape
+        w = W // 2
+        eyes = {"left": (0,), "right": (1,), "sbs": (0, 1), "anaglyph": (0, 1)}[view]
+        out_w = width if width and width < (w * len(eyes) if view != "anaglyph" else w) else (w * len(eyes) if view != "anaglyph" else w)
+        ew = out_w // (len(eyes) if view != "anaglyph" else 1)
+        eh = max(1, round(H * ew / w))
+        key = (ew, eh, rect)
+        if getattr(self, "_dmaps_key", None) != key:
+            if rect:
+                ms = [(cv2.resize(mx, (ew, eh), interpolation=cv2.INTER_LINEAR), cv2.resize(my, (ew, eh), interpolation=cv2.INTER_LINEAR))
+                      for mx, my in self.rect_maps()]
+            else:
+                gx, gy = np.meshgrid((np.arange(ew, dtype=np.float32) + 0.5) * (w / ew) - 0.5,
+                                     (np.arange(eh, dtype=np.float32) + 0.5) * (H / eh) - 0.5)
+                ms = [(gx, gy), (gx, gy)]
+            self._dmaps = [(mx, my, (mx - 0.5) / 2, (my - 0.5) / 2) for mx, my in ms]  # chroma: half-res, centre-sited
+            self._dmaps_key = key
+        area = not rect and ew < w / 1.5
+        imgs = []
+        for e in (0, 1):
+            if e not in eyes:
+                imgs.append(None)
+                continue
+            mx, my, cx, cy = self._dmaps[e]
+            Ye, Ue, Ve = Y[:, e * w:(e + 1) * w], U[:, e * w // 2:(e + 1) * w // 2], V[:, e * w // 2:(e + 1) * w // 2]
+            if area:  # plain downscale: area averaging avoids aliasing
+                y = cv2.resize(Ye, (ew, eh), interpolation=cv2.INTER_AREA)
+                u = cv2.resize(Ue, (ew, eh), interpolation=cv2.INTER_LINEAR)
+                v = cv2.resize(Ve, (ew, eh), interpolation=cv2.INTER_LINEAR)
+            else:
+                y = cv2.remap(Ye, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+                u = cv2.remap(Ue, cx, cy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=128)
+                v = cv2.remap(Ve, cx, cy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=128)
+            yf, uf, vf = y.astype(np.float32), u.astype(np.float32) - 128, v.astype(np.float32) - 128
+            bgr = np.stack([yf + 1.772 * uf, yf - 0.344136 * uf - 0.714136 * vf, yf + 1.402 * vf], -1)
+            if look == "sdk":
+                k = np.array([[0, -.5, 0], [-.5, 3, -.5], [0, -.5, 0]], np.float32)
+                bgr = cv2.filter2D(bgr, -1, k, borderType=cv2.BORDER_REPLICATE)
+            imgs.append(np.clip(bgr, 0, 255).astype(np.uint8))
+        if view == "left":
+            return imgs[0]
+        if view == "right":
+            return imgs[1]
+        if view == "anaglyph":
+            return np.dstack([imgs[1][..., 0], imgs[1][..., 1], imgs[0][..., 2]])
+        return np.concatenate(imgs, 1)
 
     def rect_maps(self):
         if self.calib is None:

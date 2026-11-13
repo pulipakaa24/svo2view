@@ -74,7 +74,7 @@ td:first-child { color: var(--muted); white-space: nowrap; }
         <button class="primary" id="play">▶ Play</button>
         <button id="prev" title="Previous frame (←)">◀ 1</button>
         <button id="next" title="Next frame (→)">1 ▶</button>
-        <label>Speed <select id="speed"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option><option>4</option><option value="0">every frame</option></select></label>
+        <label>Speed <select id="speed"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option><option>4</option><option value="0">every frame (as fast as possible)</option></select></label>
         <span class="readout mono" id="readout">—</span>
       </div>
       <div class="row">
@@ -104,7 +104,6 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const params = new URLSearchParams(location.search);
 let I = null, cur = 0, playing = false, view = "sbs", look = "camera", busy = false, pending = null, gapSet = new Map();
-let playT0 = 0, playF0 = 0;
 
 async function j(url) { const r = await fetch(url); const x = await r.json(); if (!r.ok) throw new Error(x.error || r.status); return x; }
 
@@ -156,7 +155,7 @@ function show(i, force) {
     $("img").onload = () => { if (old && old.startsWith("blob:")) URL.revokeObjectURL(old); };
     $("img").src = u; $("ph").style.display = "none";
   }).catch(e => { $("ph").style.display = ""; $("ph").innerHTML = `<span class="badc">${esc(e.message)}</span>`; stop(); })
-    .finally(() => { busy = false; if (pending !== null) { const p = pending; pending = null; show(p, true); } else if (playing) tick(); });
+    .finally(() => { busy = false; if (pending !== null) { const p = pending; pending = null; show(p, true); } });
 }
 
 function updateReadout() {
@@ -170,36 +169,53 @@ function updateReadout() {
   drawCursors();
 }
 
-// ---------------------------------------------------------------- playback (wall clock paced by the recorded timestamps)
-function tick() {
-  if (!playing) return;
-  const sp = +$("speed").value;
-  let next;
-  if (sp === 0) next = cur + 1;
-  else {
-    const want = I.frame_ms[playF0] + (performance.now() - playT0) * sp;
-    next = cur + 1;
-    while (next < I.n - 1 && I.frame_ms[next + 1] <= want) next++;     // behind: skip
-    const wait = (I.frame_ms[next] - want) / sp;
-    if (wait > 4) { setTimeout(() => { if (playing) show(next, true); }, wait); if (next >= I.n) stop(); return; }
-  }
-  if (next >= I.n) { stop(); return; }
-  show(next, true);
+// ---------------------------------------------------------------- playback
+// The server streams MJPEG: it decodes in order on all cores and paces by the recorded timestamps x speed (dropping
+// frames from the stream, never from decoding, if it falls behind). The page polls which frame is on screen.
+let sid = null, poll = null, lastPos = null;
+function streamUrl() {
+  const w = Math.round($("video").clientWidth * Math.min(devicePixelRatio || 1, 2));
+  return `/api/play.mjpg?id=${encodeURIComponent(I.name)}&start=${cur}&speed=${$("speed").value}&view=${view}&look=${look}` +
+         `&rect=${$("rect").checked ? 1 : 0}&w=${w}&sid=${sid}`;
 }
-function start() { if (!I) return; if (cur >= I.n - 1) cur = 0; playing = true; playT0 = performance.now(); playF0 = cur; $("play").textContent = "❚❚ Pause"; tick(); }
-function stop() { playing = false; $("play").textContent = "▶ Play"; }
+function start() {
+  if (!I) return;
+  if (cur >= I.n - 1) cur = 0;
+  playing = true; $("play").textContent = "❚❚ Pause";
+  sid = Math.random().toString(36).slice(2); lastPos = null;
+  $("img").src = streamUrl(); $("ph").style.display = "none";
+  clearInterval(poll);
+  const mySid = sid;
+  poll = setInterval(async () => {
+    if (!playing || sid !== mySid) return;
+    try {
+      const p = await j("/api/playpos?sid=" + mySid);
+      if (sid !== mySid || p.i === undefined) return;
+      lastPos = p;
+      if (p.i !== cur) { cur = p.i; updateReadout(); }
+      $("readout").textContent += p.dropped ? ` · ${p.dropped} not shown (behind)` : "";
+      if (p.done) stop();
+    } catch (e) { /* keep polling */ }
+  }, 100);
+}
+function stop() {
+  const was = playing;
+  playing = false; sid = null; clearInterval(poll); $("play").textContent = "▶ Play";
+  if (was) show(cur, true);   // replaces the stream (closes it) with the exact full-quality frame
+}
+function restartIfPlaying() { if (playing) { const c = cur; stop(); cur = c; start(); } else show(cur, true); }
 $("play").onclick = () => playing ? stop() : start();
-$("speed").onchange = () => { if (playing) { playT0 = performance.now(); playF0 = cur; } };
+$("speed").onchange = () => { if (playing) restartIfPlaying(); };
 $("prev").onclick = () => { stop(); show(cur - 1); };
 $("next").onclick = () => { stop(); show(cur + 1); };
 $("slider").oninput = () => { stop(); show(+$("slider").value); };
-$("rect").onchange = () => show(cur, true);
+$("rect").onchange = () => restartIfPlaying();
 $("png").onclick = () => { if (I) location.href = frameUrl(cur, "png"); };
 for (const id of ["view", "look"]) $(id).onclick = e => {
   const b = e.target.closest("button"); if (!b) return;
   [...$(id).children].forEach(x => x.classList.toggle("on", x === b));
   if (id === "view") view = b.dataset.v; else look = b.dataset.v;
-  show(cur, true);
+  restartIfPlaying();
 };
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT" && e.target.type !== "range") return;

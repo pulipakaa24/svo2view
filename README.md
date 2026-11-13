@@ -10,7 +10,7 @@ svo2view path/to/recordings/          # opens http://127.0.0.1:8790 in the brows
 ```
 
 The viewer shows side by side / left / right / red-cyan anaglyph, the stored image or an "SDK look", raw or rectified;
-plays at the recorded rate (frames are skipped when decoding falls behind), steps (← / →, shift = 10), scrubs, marks
+plays in real time at the recorded rate (or 0.25-4x), steps (← / →, shift = 10), scrubs, marks
 dropped-frame gaps, saves any frame as a full-resolution PNG, and plots every sensor stream with a cursor at the current
 frame (click a plot to seek). It listens on 127.0.0.1 only.
 
@@ -67,6 +67,8 @@ The viewer says which one it used.
   (barometer), 48 (magnetometer); float32 orientation x y z w at 60; angular velocity raw at 88, acceleration raw at 100,
   angular velocity at 112, acceleration at 124 (deg/s, m/s²); IMU temperature 228; magnetic field 236 and raw 248 (µT);
   barometer temperature 272, pressure 276 (Pa), relative altitude 284; left / right sensor temperatures 292 / 296.
+* **HD2K is stored over-under** (2208 x 2484, left on top), since 2 x 2208 px exceeds the encoder's width; the reader returns
+  side by side for every resolution.
 * **Truncated files** (recording cut by a crash or power loss) open: every complete frame and sensor sample is recovered.
 * **Rectification rule:** split the stereo rotation in half between the cameras, then turn the baseline onto x, with the
   SDK's rectified intrinsics; distortion is the SDK's rational model.
@@ -76,8 +78,9 @@ work and are untested; issues with a sample file are welcome.
 
 ## Speed
 
-On an Apple-silicon Mac: decode 39 ms per frame at HD720 (2560 x 720 side by side) and 122 ms at HD2K; the viewer plays
-HD720 at about 16 fps over its local HTTP connection. Random access costs up to one second of frames.
+Playback decodes in order on all cores (FFmpeg frame threading) and streams to the page, paced by the recorded
+timestamps: on an Apple-silicon Mac, 7.4 ms per frame at HD720 and 11.3 ms at HD2K, so real time with no dropped frames.
+Still frames (stepping, scrubbing, PNG export) decode at full quality; a jump costs up to one second of frames.
 
 ## Development
 

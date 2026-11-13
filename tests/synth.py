@@ -59,9 +59,14 @@ def sensor_struct(k, t_ns):
     return bytes(b), vals
 
 
-def write(path, n=12, w=64, h=48, fps=5, sensors_per_frame=4, t0=1_700_000_000_000_000_000):
+def over_under(Y, U, V, w):
+    """Side-by-side planes -> the over-under layout the SDK uses when 2W exceeds the encoder width (HD2K)."""
+    return (np.vstack([Y[:, :w], Y[:, w:]]), np.vstack([U[:, :w // 2], U[:, w // 2:]]), np.vstack([V[:, :w // 2], V[:, w // 2:]]))
+
+
+def write(path, n=12, w=64, h=48, fps=5, sensors_per_frame=4, t0=1_700_000_000_000_000_000, stacked=False):
     frames = frames_yuv(n, w, h)
-    pkts = encode_hevc_lossless(frames, fps)
+    pkts = encode_hevc_lossless([over_under(*f, w) for f in frames] if stacked else frames, fps)
     times = [t0 + i * 1_000_000_000 // fps for i in range(n)]
     sens = []
     with open(path, "wb") as f:

@@ -39,6 +39,30 @@ def test_decode_is_exact_sequential_and_random(rec):
     assert s.is_keyframe(0) and s.is_keyframe(t["fps"]) and not s.is_keyframe(1)
 
 
+def test_stream_matches_random_access(rec):
+    p, t = rec
+    s = SVO2(p)
+    got = [(i, Y) for i, Y, U, V in s.stream(3)]
+    assert [i for i, _ in got] == list(range(3, s.n))
+    assert all(np.array_equal(Y, t["frames"][i][0]) for i, Y in got)
+    g = s.stream(0)                 # stopping early must not hang (frame-threaded decoder drained)
+    next(g)
+    g.close()
+    for view in ("sbs", "left", "right", "anaglyph"):
+        im = s.display(*s.yuv(4), view=view, width=60)
+        assert im.ndim == 3 and im.shape[1] in (60, 30)
+
+
+def test_over_under_layout_is_rearranged(tmp_path):
+    p = str(tmp_path / "stacked.svo2")
+    t = write(p, stacked=True)
+    s = SVO2(p)
+    for i in (0, 6, 3):
+        Y, U, V = s.yuv(i)
+        assert np.array_equal(Y, t["frames"][i][0]) and np.array_equal(U, t["frames"][i][1]), i
+    assert [i for i, *_ in s.stream(0)] == list(range(s.n))
+
+
 def test_image_shapes_and_looks(rec):
     p, t = rec
     s = SVO2(p)
@@ -147,5 +171,9 @@ def test_server(rec):
             r = urllib.request.urlopen(f"{base}/api/frame?id={rid}&i=4&view={view}")
             assert r.headers["Content-Type"] == "image/jpeg" and len(r.read()) > 100
         assert urllib.request.urlopen(base + "/").read().startswith(b"<!doctype html>")
+        body = urllib.request.urlopen(f"{base}/api/play.mjpg?id={rid}&start=2&speed=0&sid=t1").read()
+        assert body.count(b"--svoframe") == len(t["frames"]) - 2
+        pos = json.load(urllib.request.urlopen(f"{base}/api/playpos?sid=t1"))
+        assert pos["done"] and pos["i"] == len(t["frames"]) - 1
     finally:
         srv.shutdown()

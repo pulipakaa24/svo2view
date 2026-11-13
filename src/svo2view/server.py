@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -24,6 +25,7 @@ from .reader import SVO2
 HERE = os.path.dirname(os.path.abspath(__file__))
 RECS: list = []          # [{"id", "name", "path"}]
 CACHE: dict = {}
+PLAY: dict = {}   # playback stream id -> {i, done, shown, dropped}
 MU = threading.Lock()
 ARGS = None
 
@@ -113,6 +115,47 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, obj, code=200):
         self._send(json.dumps(obj).encode(), "application/json", code)
 
+    def _play(self, q):
+        """MJPEG playback: decode in order on all cores, pace by the recorded timestamps x speed, drop frames from the
+        stream (never from decoding) when behind; the page polls /api/playpos for the frame on screen."""
+        sid = q.get("sid", "")
+        s = get(q.get("id", ""))
+        start = max(0, min(int(q.get("start", 0)), s.n - 1))
+        speed = float(q.get("speed", 1) or 0)
+        look, rect, view, width = q.get("look", "camera"), q.get("rect") == "1", q.get("view", "sbs"), int(q.get("w", 0) or 0)
+        self.close_connection = True
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=svoframe")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        PLAY[sid] = {"i": start, "done": False, "shown": 0, "dropped": 0}
+        while len(PLAY) > 50:
+            PLAY.pop(next(iter(PLAY)))
+        g = s.stream(start)
+        t0, ts0 = None, int(s.t_ns[start])
+        period = 1.0 / s.fps if s.fps else 0.033
+        try:
+            for i, Y, U, V in g:
+                if t0 is None:
+                    t0 = time.monotonic()
+                if speed > 0:
+                    late = time.monotonic() - t0 - (int(s.t_ns[i]) - ts0) / 1e9 / speed
+                    if late > period / speed and i < s.n - 1:
+                        PLAY[sid]["dropped"] += 1
+                        continue
+                    if late < 0:
+                        time.sleep(-late)
+                b = cv2.imencode(".jpg", s.display(Y, U, V, look, rect, view, width), [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes()
+                self.wfile.write(b"--svoframe\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(b)).encode() + b"\r\n\r\n" + b + b"\r\n")
+                self.wfile.flush()
+                PLAY[sid].update(i=i, shown=PLAY[sid]["shown"] + 1)
+            PLAY[sid]["done"] = True
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            g.close()
+
     def do_GET(self):
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
@@ -124,6 +167,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"recordings": [{k: r[k] for k in ("id", "name", "size_bytes")} for r in RECS]})
             if u.path == "/api/info":
                 return self._json(info(q.get("id", "")))
+            if u.path == "/api/playpos":
+                return self._json(PLAY.get(q.get("sid", ""), {}))
+            if u.path == "/api/play.mjpg":
+                return self._play(q)
             if u.path == "/api/frame":
                 fmt = q.get("fmt", "jpg")
                 b, ctype = frame(q.get("id", ""), int(q.get("i", 0)), q.get("look", "camera"), q.get("rect") == "1",
