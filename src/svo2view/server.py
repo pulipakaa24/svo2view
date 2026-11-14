@@ -189,6 +189,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def main(argv=None):
     global ARGS, RECS
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["export"]:
+        from .export import main as export_main
+        return export_main(argv[1:])
     ap = argparse.ArgumentParser(prog="svo2view", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("paths", nargs="+", help=".svo2 files or folders")
     ap.add_argument("--port", type=int, default=8790)

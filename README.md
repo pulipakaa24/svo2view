@@ -26,6 +26,22 @@ S = s.sensors()                 # dict of arrays: t, acc, gyro, acc_raw, gyro_ra
                                 # pressure_pa, rel_alt_m, temp_imu / temp_baro / temp_left / temp_right, t_imu / t_mag / t_baro
 ```
 
+### Export for people without svo2view
+
+```
+svo2view export rec.svo2 --rect          # -> rec.mp4, rec_frames.csv, rec_sensors.csv next to the recording
+```
+
+* `rec.mp4`: H.264, side by side (or `--view left|right|anaglyph`), raw or `--rect`ified, 3840 px wide by default
+  (`--width 0` = full resolution). Frame times are the recorded image timestamps, so a dropped frame holds the previous
+  image for as long as the camera actually missed it, and the video lasts exactly as long as the recording.
+* `rec_frames.csv`: frame index, timestamp (ns), seconds from the first frame, gap to the previous frame (ms), keyframe.
+* `rec_sensors.csv`: every sensor sample (about 400 Hz on a ZED 2i): acceleration and angular velocity (calibrated and
+  raw), orientation quaternion, magnetometer, barometer pressure and relative altitude, temperatures, and each sensor's own
+  timestamp.
+
+A 103 s HD2K @ 15 recording (3.7 GB) exports to a 397 MB rectified MP4 in about a minute on an Apple-silicon Mac.
+
 ## How close to the ZED SDK it is
 
 Measured against the ZED SDK 5.5.0's own output for the same file (ZED 2i, HD720 @ 30, `H265_LOSSLESS`; `tools/zed_truth.py`
@@ -75,6 +91,19 @@ The viewer says which one it used.
 
 Tested with SVO2 files from ZED SDK 5.5 and a ZED 2i. Other cameras (ZED X, ZED Mini) and other SDK versions are likely to
 work and are untested; issues with a sample file are welcome.
+
+## Known limits and open questions
+
+* **"SDK look" is approximate.** The SDK sharpens images on playback; the exact filter (and whether playback honours the
+  camera's SHARPNESS / GAMMA settings) is not yet pinned down. The stored image (`look="camera"`) is exact.
+* **Depth, tracking, object detection** are not reproduced; they need the SDK's closed models.
+* **Factory-calibration rectification** is ~1.8 px off the SDK's; export the SDK calibration once per camera and resolution
+  (`tools/zed_export_calib.py`) for an exact match.
+* **Magnetometer:** values are reproduced exactly, but a camera whose magnetometer has not been calibrated (ZED Sensor
+  Viewer) reports a field of only ~2 µT with calibrated == raw, and the SDK's heading stays 0. That is the camera's data,
+  not a reader error; Earth's field is ~25-65 µT.
+* **Dropped frames** are the recorder's, not the reader's: gaps show up in the timeline, in `_frames.csv`, and as holds in
+  an exported MP4.
 
 ## Speed
 

@@ -177,3 +177,28 @@ def test_server(rec):
         assert pos["done"] and pos["i"] == len(t["frames"]) - 1
     finally:
         srv.shutdown()
+
+
+def test_export_mp4_and_csvs(rec, tmp_path):
+    import csv
+
+    import av
+
+    from svo2view.server import main as cli
+    p, t = rec
+    assert cli(["export", p, "--out", str(tmp_path), "--width", "0"]) == 0
+    stem = os.path.splitext(os.path.basename(p))[0]
+    rows = list(csv.DictReader(open(tmp_path / f"{stem}_frames.csv")))
+    assert [int(r["t_ns"]) for r in rows] == t["times"]
+    s = SVO2(p)
+    S = s.sensors()
+    srows = list(csv.DictReader(open(tmp_path / f"{stem}_sensors.csv")))
+    assert len(srows) == len(S["t"]) and int(srows[-1]["t_ns"]) == int(S["t"][-1])
+    assert abs(float(srows[0]["acc_x_m_s2"]) - float(S["acc"][0, 0])) < 1e-5
+    with av.open(str(tmp_path / f"{stem}.mp4")) as c:
+        v = c.streams.video[0]
+        frames = list(c.decode(v))
+        assert len(frames) == s.n and (v.width, v.height) == (2 * s.width, s.height)
+        dur = (frames[-1].pts - frames[0].pts) * float(v.time_base)          # recorded timing, not n / fps
+        assert abs(dur - (t["times"][-1] - t["times"][0]) / 1e9) < 0.002
+    assert not [f for f in os.listdir(tmp_path) if f.endswith(".part")]
